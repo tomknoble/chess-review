@@ -274,7 +274,12 @@ def main():
                 if len(list(g.mainline_moves())) < 6:
                     continue
                 raw.append(g)
-    raw.sort(key=lambda g: (g.headers.get("Date", ""), g.headers.get("EndTime", g.headers.get("UTCTime", ""))))
+    def sort_key(g):
+        # zero-pad the clock time so "9:38:40" sorts before "20:56:42"
+        h = g.headers
+        t = h.get("EndTime", h.get("UTCTime", "00:00:00")).split(" ")[0]
+        return (h.get("Date", ""), ":".join(p.zfill(2) for p in t.split(":")))
+    raw.sort(key=sort_key, reverse=cfg.get("newest_first", True))   # newest game first
 
     cache_dir = os.path.join(HERE, ".cache")
     os.makedirs(cache_dir, exist_ok=True)
