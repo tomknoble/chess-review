@@ -43,6 +43,7 @@ h3{margin:1.2em 0 .4em;font-size:16px}
 #evalbar .w{position:absolute;left:0;right:0;bottom:0;background:#f0f0f0;transition:height .15s}
 #evalbar .t{position:absolute;left:0;right:0;font-size:10px;text-align:center;color:#888}
 #boardcol{width:min(520px,calc(100vw - 340px));min-width:300px}
+@media(min-width:900px){#boardwrap{position:sticky;top:10px}}
 #boardcol svg{width:100%;height:auto;display:block;border-radius:4px}
 .who{display:flex;justify-content:space-between;padding:4px 2px;font-size:14px}
 #panel{flex:1;min-width:300px}
@@ -126,22 +127,24 @@ function arrow(from,to,color,flip){
          `<polygon points="${p1} ${p2} ${p3}" fill="${color}"/></g>`;
 }
 function boardSVG(fen, flip, hl, arrows){
-  let s = `<svg viewBox="0 0 480 480" xmlns="http://www.w3.org/2000/svg">`;
+  // 24px margin on the left and bottom holds the file letters (a-h) and rank numbers (1-8)
+  let s = `<svg viewBox="0 0 504 504" xmlns="http://www.w3.org/2000/svg"><g transform="translate(24,0)">`;
   for(let r=0;r<8;r++)for(let f=0;f<8;f++){
     const light=(f+r)%2===1, sq=String.fromCharCode(97+f)+(r+1), p=sqXY(sq,flip);
     s+=`<rect x="${p.x}" y="${p.y}" width="60" height="60" fill="${light?'#ebecd0':'#779556'}"/>`;
     if(hl && hl.includes(sq)) s+=`<rect x="${p.x}" y="${p.y}" width="60" height="60" fill="#f6f669" opacity=".55"/>`;
-  }
-  for(let i=0;i<8;i++){
-    const f=flip?7-i:i, r=flip?i:7-i;
-    s+=`<text x="${i*60+3}" y="${472}" font-size="11" fill="${(i%2===(flip?0:1))?'#ebecd0':'#779556'}" font-family="sans-serif">${String.fromCharCode(97+(flip?7-i:i))}</text>`;
-    s+=`<text x="${474}" y="${i*60+12}" text-anchor="end" font-size="11" fill="${(i%2===0)?'#779556':'#ebecd0'}" font-family="sans-serif">${flip?i+1:8-i}</text>`;
   }
   for(const p of parseFen(fen)){
     const sq=String.fromCharCode(97+p.f)+(p.r+1), xy=sqXY(sq,flip);
     s+=`<g transform="translate(${xy.x},${xy.y}) scale(${60/45})">${D.pieces[p.ch]}</g>`;
   }
   (arrows||[]).forEach(a=>{s+=arrow(a.from,a.to,a.color,flip);});
+  s+=`</g>`;
+  for(let i=0;i<8;i++){
+    const file=String.fromCharCode(97+(flip?7-i:i)), rank=flip?i+1:8-i;
+    s+=`<text x="${24+i*60+30}" y="498" text-anchor="middle" font-size="16" font-weight="600" fill="#e8e6e1" font-family="system-ui,sans-serif">${file}</text>`;
+    s+=`<text x="11" y="${i*60+30}" text-anchor="middle" dominant-baseline="central" font-size="16" font-weight="600" fill="#e8e6e1" font-family="system-ui,sans-serif">${rank}</text>`;
+  }
   return s+'</svg>';
 }
 
@@ -204,6 +207,7 @@ function renderOverview(){
 function curGame(){return GAMES[S.g];}
 function renderGame(){
   const g=curGame(); if(!g) return;
+  const keepY=window.scrollY, oldMoves=$('moves'), keepMoves=oldMoves?oldMoves.scrollTop:0;
   const n=g.plies.length;
   S.ply=Math.max(0,Math.min(n,S.ply));
   const sign=mySign(g);
@@ -235,7 +239,13 @@ function renderGame(){
   h += `<div id="moves">${moveList(g)}</div></div></div>`;
   h += `<div id="graph">${graph(g)}</div><div class="legend"><span>● <span style="color:#e5534b">blunder</span></span><span>● <span style="color:#e8923c">mistake</span></span><span>● <span style="color:#d9c04a">inaccuracy</span></span><span>Eval graph is from your side (up = good for you). Use ← → keys.</span></div>`;
   $('main').innerHTML = h;
-  const cur = document.querySelector('.mv.on'); if(cur) cur.scrollIntoView({block:'nearest'});
+  window.scrollTo(0,keepY);   // never let the page jump when stepping through moves
+  const box=$('moves'), cur=box&&box.querySelector('.mv.on');
+  if(box){
+    box.scrollTop=keepMoves;
+    if(cur){ const b=box.getBoundingClientRect(), c=cur.getBoundingClientRect();
+      if(c.top<b.top) box.scrollTop-= (b.top-c.top)+6; else if(c.bottom>b.bottom) box.scrollTop+= (c.bottom-b.bottom)+6; }
+  }
 }
 function commentary(g,p,sign){
   if(!p) return `<b>Start of game</b><div class="mute">Use the arrow keys or click a move. Click one of your key moments below to try it as a puzzle.</div>`;
