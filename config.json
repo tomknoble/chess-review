@@ -1,5 +1,7 @@
 {
   "username": "tomknoble",
   "depth": 14,
-  "skip_bot_games": true
+  "skip_bot_games": true,
+  "utc_offset_minutes": 330,
+  "newest_first": true
 }

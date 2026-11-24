@@ -275,10 +275,13 @@ def main():
                     continue
                 raw.append(g)
     def sort_key(g):
-        # zero-pad the clock time so "9:38:40" sorts before "20:56:42"
+        # Chess.com writes the Date in YOUR local time but EndTime in GMT.
+        # Convert EndTime to local time of day so games sort in the order you played them.
         h = g.headers
         t = h.get("EndTime", h.get("UTCTime", "00:00:00")).split(" ")[0]
-        return (h.get("Date", ""), ":".join(p.zfill(2) for p in t.split(":")))
+        hh, mm, ss = (int(x) for x in (t.split(":") + ["0", "0"])[:3])
+        local = (hh * 3600 + mm * 60 + ss + cfg.get("utc_offset_minutes", 330) * 60) % 86400
+        return (h.get("Date", ""), local)
     raw.sort(key=sort_key, reverse=cfg.get("newest_first", True))   # newest game first
 
     cache_dir = os.path.join(HERE, ".cache")
