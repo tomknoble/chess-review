@@ -86,30 +86,38 @@ def material_lost_to(board_after, reply, already_won=0):
 
 
 def explain(board, played, best, info0, info1, mover_cp0, mover_cp1, mate0, mate1, mover):
-    """Plain-language reason for a flagged move. Returns (tag, text)."""
+    """Plain-language reason for a flagged move. Returns (tag, text, extra)."""
     sign = 1 if mover == chess.WHITE else -1
-    best_san = board.san(best) if best else None
     won_by_move = capture_value(board, played)
     after = board.copy()
     after.push(played)
     mm0 = None if mate0 is None else sign * mate0   # + means we mate
     mm1 = None if mate1 is None else sign * mate1
     if mm1 is not None and mm1 < 0 and mm1 != 0:
-        return "walked_mate", f"This allows a forced checkmate against you in {abs(mm1)}."
+        return "walked_mate", f"This allows a forced checkmate against you in {abs(mm1)}.", None
     if mm0 is not None and mm0 > 0 and not (mm1 is not None and mm1 > 0):
-        return "missed_mate", f"You had a forced checkmate in {mm0} here ({best_san}) and missed it."
+        return "missed_mate", f"You had a forced checkmate in {mm0} here and missed it.", None
     reply = info1.get("pv", [None])[0] if info1.get("pv") else None
     if reply and not after.is_game_over():
         net = material_lost_to(after, reply, won_by_move)
         if net >= 2:
-            return "hung", (f"This leaves material hanging: the opponent can reply {after.san(reply)} "
-                            f"and win about {net} points of material.")
+            return "hung", (f"This leaves material hanging: your opponent can capture and win "
+                            f"about {net} points of material."), after.san(reply)
     if mover_cp0 >= 300 and mover_cp1 < 100:
-        return "threw", (f"You were clearly winning and this gives most of it away. "
-                         f"The safer move was {best_san}.")
+        return "threw", "You were clearly winning and this gives most of it away.", None
     if best and (board.is_capture(best) or board.gives_check(best)):
-        return "missed_tactic", f"A tactic was available: {best_san}."
-    return "other", f"The engine preferred {best_san} here."
+        return "missed_tactic", "A forcing move (a capture or a check) was stronger here.", None
+    return "other", "The engine preferred a different move here.", None
+
+
+def line_fens(start_board, moves):
+    """A short engine line as [{san, uci, fen-after}] so the page can play it on the board."""
+    bb, out = start_board.copy(), []
+    for m in moves:
+        san = bb.san(m)
+        bb.push(m)
+        out.append({"s": san, "u": m.uci(), "f": bb.fen()})
+    return out
 
 
 def analyse_game(game, engine, depth, user):
@@ -159,12 +167,14 @@ def analyse_game(game, engine, depth, user):
         if best is not None:
             rec["b"] = bd.san(best)
             rec["bu"] = best.uci()
-            rec["ln"] = bd.variation_san(pv0[:5])
-        if pv1 and not boards[i + 1].is_game_over():
-            rec["rl"] = boards[i + 1].variation_san(pv1[:4])
         if cls in ("inaccuracy", "mistake", "blunder") and best is not None:
-            tag, text = explain(bd, mv, best, infos[i], infos[i + 1], sign * cp0, sign * cp1, mate0, mate1, mover)
+            tag, text, extra = explain(bd, mv, best, infos[i], infos[i + 1], sign * cp0, sign * cp1, mate0, mate1, mover)
             rec["tg"], rec["w"] = tag, text
+            if extra:
+                rec["hr"] = extra
+            rec["bl"] = line_fens(bd, pv0[:6])                      # what the engine would play instead
+            if pv1 and not boards[i + 1].is_game_over():
+                rec["rlf"] = line_fens(boards[i + 1], pv1[:4])      # what happens after the move played
         plies.append(rec)
 
     result = h.get("Result", "*")
@@ -290,7 +300,7 @@ def main():
     games = []
     try:
         for n, g in enumerate(raw, 1):
-            blob = f"{g}|{depth}|{user}|v3"
+            blob = f"{g}|{depth}|{user}|v4"
             ck = os.path.join(cache_dir, hashlib.sha1(blob.encode()).hexdigest() + ".json")
             if os.path.exists(ck):
                 games.append(json.load(open(ck)))

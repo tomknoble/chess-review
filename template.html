@@ -91,7 +91,7 @@ const TAGS = {
   missed_tactic:['Missing tactics','A capture or check was stronger than what you played. Daily puzzles train this.'],
   other:['Other weaker moves','The engine simply preferred a different move.']
 };
-let S = {g:null, ply:0, flip:false, mode:'normal', tab:'overview'};
+let S = {g:null, ply:0, flip:false, mode:'normal', tab:'overview', line:null};
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -103,6 +103,28 @@ function fmt(cp, mate, sign){
     const v = sign*mate; return (v>0?'+':'-')+'M'+Math.abs(v);
   }
   const v = sign*cp/100; return (v>0?'+':'')+v.toFixed(1);
+}
+const NAMES={K:'King',Q:'Queen',R:'Rook',B:'Bishop',N:'Knight'};
+function sanWords(san){
+  if(!san) return '';
+  let sfx = san.endsWith('#') ? ' \u2014 checkmate!' : (san.endsWith('+') ? ' \u2014 check' : '');
+  let s = san.replace(/[+#]/g,'');
+  if(s.startsWith('O-O-O')) return 'Castle queenside'+sfx;
+  if(s.startsWith('O-O')) return 'Castle kingside'+sfx;
+  let promo=''; const pm=s.match(/=([QRBN])/);
+  if(pm){ promo=' and promotes to a '+NAMES[pm[1]].toLowerCase(); s=s.replace(/=[QRBN]/,''); }
+  let piece='Pawn'; if(/^[KQRBN]/.test(s)){ piece=NAMES[s[0]]; s=s.slice(1); }
+  const cap=s.includes('x'); const sq=s.slice(-2); let from=s.slice(0,-2).replace('x','');
+  let who=piece;
+  if(from){
+    const where = from.length===2 ? from : (/[a-h]/.test(from) ? 'the '+from+'-file' : 'rank '+from);
+    who = piece+' from '+where;
+  }
+  return (cap ? who+' takes on '+sq : who+' moves to '+sq)+promo+sfx;
+}
+function sideName(g,col){
+  if(!g.mycolor) return col==='w'?'White':'Black';
+  return ((col==='w')===(g.mycolor==='white'))?'You':'Opponent';
 }
 function winp(cp){return 50+50*(2/(1+Math.exp(-0.00368208*cp))-1);}
 
@@ -213,9 +235,16 @@ function renderGame(){
   const sign=mySign(g);
   const p = S.ply>0 ? g.plies[S.ply-1] : null;
   const showBefore = p && (S.mode==='quiz'||S.mode==='reveal');
-  const fen = showBefore ? (S.ply>1?g.plies[S.ply-2].f:g.start) : (p?p.f:g.start);
+  const inLine = p && S.mode==='line' && S.line && p[S.line.kind];
+  const beforeFen = S.ply>1?g.plies[S.ply-2].f:g.start;
+  let fen = (showBefore||inLine) ? beforeFen : (p?p.f:g.start);
   let hl=[], arrows=[];
-  if(p && !showBefore) hl=[p.u.slice(0,2),p.u.slice(2,4)];
+  if(p && !showBefore && !inLine) hl=[p.u.slice(0,2),p.u.slice(2,4)];
+  if(inLine){
+    const L=p[S.line.kind], i=S.line.i, start = S.line.kind==='bl' ? beforeFen : p.f;
+    fen = i===0 ? start : L[i-1].f;
+    if(i>0) arrows.push({from:L[i-1].u.slice(0,2),to:L[i-1].u.slice(2,4),color:'#4c8dff'});
+  }
   if(showBefore){
     if(S.mode==='reveal'){
       if(p.bu) arrows.push({from:p.bu.slice(0,2),to:p.bu.slice(2,4),color:'#4caf50'});
@@ -251,22 +280,35 @@ function commentary(g,p,sign){
   if(!p) return `<b>Start of game</b><div class="mute">Use the arrow keys or click a move. Click one of your key moments below to try it as a puzzle.</div>`;
   const who = p.me===true?'You':(p.me===false?'Opponent':(p.col==='w'?'White':'Black'));
   const moveNo = Math.ceil(S.ply/2)+(p.col==='b'?'...':'.');
-  const s = p.me===false?-sign:sign; // eval from your side; for unknown user keep white POV
-  const sg = g.mycolor?sign:1;
+  const sg = g.mycolor?mySign(g):1;
+  const words = (san)=>`${esc(sanWords(san))} <span class="mute">(${esc(san)})</span>`;
   if(S.mode==='quiz'){
-    return `<span class="badge" style="background:#58a6ff">Puzzle</span><b>Move ${moveNo} — ${esc(p.col==='w'?'White':'Black')} to move</b>`+
-      `<div style="margin:8px 0">Here you played <b>${esc(p.s)}</b>. Can you find something better? Look at what the opponent threatens and what you can capture or attack.</div>`+
+    return `<span class="badge" style="background:#58a6ff">Puzzle</span><b>Move ${moveNo} \u2014 ${esc(p.col==='w'?'White':'Black')} to move</b>`+
+      `<div style="margin:8px 0">Here you played: <b>${esc(sanWords(p.s))}</b>. Can you find something better? Look at what the opponent threatens and what you can capture or attack.</div>`+
       `<div class="btns"><button class="b pri" onclick="CR.reveal()">Show the answer</button><button class="b" onclick="CR.normal()">Back to the game</button></div>`;
   }
-  let h = `<span class="badge k-${p.k}">${KNAME[p.k]}</span><b>${who}: ${moveNo} ${esc(p.s)}</b>`;
-  h += `<div class="mute" style="margin:4px 0">Eval (from your side): ${fmt(p.c0,p.m0,sg)} → <b style="color:var(--text)">${fmt(p.c,p.m,sg)}</b></div>`;
-  if(p.w) h += `<div style="margin:8px 0">${esc(p.w)}</div>`;
-  if(p.b && p.k!=='best' && p.k!=='good') h += `<div style="margin:8px 0">Best was <b>${esc(p.b)}</b>.${p.ln?` <span class="mute">Engine line: ${esc(p.ln)}</span>`:''}</div>`;
-  else if(p.k==='best') h += `<div class="mute" style="margin:8px 0">This was the engine's top choice.</div>`;
-  if(p.rl && (p.k==='mistake'||p.k==='blunder')) h += `<div class="mute">What happens next: ${esc(p.rl)}</div>`;
+  if(S.mode==='line' && S.line && p[S.line.kind]){
+    const L=p[S.line.kind], first = S.line.kind==='bl' ? p.col : (p.col==='w'?'b':'w');
+    let h=`<span class="badge" style="background:#58a6ff">Line preview</span><b>${S.line.kind==='bl'?'What the engine would play instead':'What could happen after your move'}</b>`;
+    h+=`<div class="mute" style="margin:4px 0 8px">Step through with \u25c0 \u25b6. The blue arrow shows the move just played.</div><ol style="margin:0;padding-left:22px">`;
+    L.forEach((m,i)=>{ const col = (i%2===0)?first:(first==='w'?'b':'w');
+      h+=`<li style="${S.line.i===i+1?'font-weight:700':'color:var(--mute)'}">${esc(sideName(g,col))}: ${esc(sanWords(m.s))} <span class="mute">(${esc(m.s)})</span></li>`; });
+    h+=`</ol><div class="btns"><button class="b" onclick="CR.lstep(-1)">\u25c0</button><button class="b" onclick="CR.lstep(1)">\u25b6</button><button class="b pri" onclick="CR.normal()">Back to the game</button></div>`;
+    return h;
+  }
   const flagged=(p.k==='inaccuracy'||p.k==='mistake'||p.k==='blunder')&&p.b;
+  let h = `<span class="badge k-${p.k}">${KNAME[p.k]}</span><b>${who}: ${moveNo} ${words(p.s)}</b>`;
+  h += `<div class="mute" style="margin:4px 0">Eval (from your side): ${fmt(p.c0,p.m0,sg)} \u2192 <b style="color:var(--text)">${fmt(p.c,p.m,sg)}</b></div>`;
+  if(p.w) h += `<div style="margin:8px 0">${esc(p.w)}</div>`;
+  if(p.hr) h += `<div style="margin:8px 0"><b>Their winning reply:</b> ${words(p.hr)}</div>`;
+  if(flagged) h += `<div style="margin:8px 0"><b>Better was:</b> ${words(p.b)}</div>`;
+  else if(p.k==='best') h += `<div class="mute" style="margin:8px 0">This was the engine's top choice.</div>`;
   h += `<div class="btns">`;
-  if(flagged) h += S.mode==='reveal' ? `<button class="b" onclick="CR.normal()">Back to position after the move</button>` : `<button class="b pri" onclick="CR.quiz()">Try it as a puzzle</button><button class="b" onclick="CR.reveal()">Show best move</button>`;
+  if(flagged){
+    h += S.mode==='reveal' ? `<button class="b" onclick="CR.normal()">Back to position after the move</button>` : `<button class="b pri" onclick="CR.quiz()">Try it as a puzzle</button><button class="b" onclick="CR.reveal()">Show best move</button>`;
+    if(p.bl) h += `<button class="b" onclick="CR.line('bl')">\u25b6 Play the better line</button>`;
+    if(p.rlf && (p.k==='mistake'||p.k==='blunder')) h += `<button class="b" onclick="CR.line('rlf')">\u25b6 What happens after my move</button>`;
+  }
   h += `</div>`;
   return h;
 }
@@ -311,16 +353,19 @@ window.CR = {
   overview(){S.tab='overview';S.g=null;refresh();window.scrollTo(0,0);},
   open(i){S.tab='game';S.g=i;S.ply=0;S.mode='normal';S.flip=false;refresh();window.scrollTo(0,0);},
   openAt(i,ply,mode){S.tab='game';S.g=i;S.ply=ply;S.mode=mode;S.flip=false;refresh();window.scrollTo(0,0);},
-  go(n){S.ply=n;S.mode='normal';renderGame();},
-  step(d){S.ply+=d;S.mode='normal';renderGame();},
+  go(n){S.ply=n;S.mode='normal';S.line=null;renderGame();},
+  step(d){S.ply+=d;S.mode='normal';S.line=null;renderGame();},
+  line(kind){S.mode='line';S.line={kind:kind,i:0};renderGame();},
+  lstep(d){const L=curGame().plies[S.ply-1][S.line.kind]||[];S.line.i=Math.max(0,Math.min(L.length,S.line.i+d));renderGame();},
   flip(){S.flip=!S.flip;renderGame();},
   quiz(){S.mode='quiz';renderGame();},
   reveal(){S.mode='reveal';renderGame();},
-  normal(){S.mode='normal';renderGame();},
+  normal(){S.mode='normal';S.line=null;renderGame();},
   graphClick(ev,n){const r=ev.currentTarget.getBoundingClientRect();S.ply=Math.round(((ev.clientX-r.left)/r.width)*n);S.mode='normal';renderGame();}
 };
 document.addEventListener('keydown',e=>{
   if(S.tab!=='game') return;
+  if(S.mode==='line'&&(e.key==='ArrowLeft'||e.key==='ArrowRight')){CR.lstep(e.key==='ArrowLeft'?-1:1);e.preventDefault();return;}
   if(e.key==='ArrowLeft'){CR.step(-1);e.preventDefault();}
   else if(e.key==='ArrowRight'){CR.step(1);e.preventDefault();}
   else if(e.key==='Home'){CR.go(0);}
